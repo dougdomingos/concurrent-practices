@@ -1,5 +1,5 @@
+from multiprocessing import Manager, Pool
 from os import listdir, path
-from multiprocessing import Lock, Manager, Process
 
 
 def get_words_directory() -> str:
@@ -22,7 +22,7 @@ def get_words_directory() -> str:
     return dir_path
 
 
-def count_words_of_file(file_path: str, lock, stats: dict) -> None:
+def count_words_of_file(file_path: str) -> tuple:
     """Counts the number of words in the file.
 
     Args:
@@ -36,11 +36,16 @@ def count_words_of_file(file_path: str, lock, stats: dict) -> None:
 
         for _ in words:
             word_counter += 1
+    
+    return path.basename(file_path), word_counter
 
-    with lock:
-        if word_counter > stats["max_word_count"]:
-            stats["max_word_count"] = word_counter
-            stats["biggest_file"] = path.basename(file_path)
+
+def update_status(results: tuple, stats: dict):
+    file_name, word_counter = results
+
+    if word_counter > stats["max_word_count"]:
+        stats["max_word_count"] = word_counter
+        stats["biggest_file"] = file_name
 
 
 def get_biggest_file() -> None:
@@ -50,17 +55,11 @@ def get_biggest_file() -> None:
 
     with Manager() as manager:
         stats = manager.dict({"biggest_file": "", "max_word_count": 0})
-        lock = Lock()
-        processes = []
+        files = [path.join(directory, file) for file in listdir(directory)]
 
-        for file in listdir(directory):
-            file_path = path.join(directory, file)
-            new_process = Process(target=count_words_of_file, args=(file_path, lock, stats))
-            processes.append(new_process)
-            new_process.start()
-
-        for process in processes:
-            process.join()
+        with Pool(10) as pool:
+            for result in pool.imap_unordered(count_words_of_file, files):
+                update_status(result, stats)
 
         print(
             f'Concurrent: The biggest file is {stats["biggest_file"]}, with {stats["max_word_count"]} words.'
